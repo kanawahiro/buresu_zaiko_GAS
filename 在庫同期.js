@@ -66,9 +66,9 @@ function syncMasterToFacility() {
 
     if (masterMap[msku]) {
       const masterRow = masterMap[msku];
-      COL_MAP.forEach(({ masterCol, facilityCol }) => {
-        facilitySheet.getRange(i + 1, facilityCol).setValue(masterRow[masterCol]);
-      });
+      // B〜G列（facilityCol 2〜7）をまとめて1回で書き込む
+      const rowValues = COL_MAP.map(({ masterCol }) => masterRow[masterCol]);
+      facilitySheet.getRange(i + 1, 2, 1, rowValues.length).setValues([rowValues]);
       updated++;
     } else {
       notFound.push(msku);

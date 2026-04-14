@@ -35,11 +35,22 @@ function syncMasterToFacility() {
   const facilityData = facilitySheet.getDataRange().getValues();
 
   let updated = 0;
+  let skipped = 0;
   let notFound = [];
 
   for (let i = 1; i < facilityData.length; i++) {
     const msku = String(facilityData[i][FACILITY_MSKU_COL]).trim();
     if (!msku) continue;
+
+    // B列（facilityCol=2、0始まりだとindex=1）に値があればスキップ
+    const hasData = COL_MAP.some(({ facilityCol }) => {
+      const val = facilityData[i][facilityCol - 1];
+      return val !== '' && val !== null && val !== undefined;
+    });
+    if (hasData) {
+      skipped++;
+      continue;
+    }
 
     if (masterMap[msku]) {
       const masterRow = masterMap[msku];
@@ -54,6 +65,9 @@ function syncMasterToFacility() {
 
   // 完了メッセージ
   let msg = `同期完了：${updated}件を更新しました。`;
+  if (skipped > 0) {
+    msg += `\n既にデータあり（スキップ）：${skipped}件`;
+  }
   if (notFound.length > 0) {
     msg += `\n\n大元シートに見つからなかったMSKU（${notFound.length}件）:\n${notFound.join('\n')}`;
   }

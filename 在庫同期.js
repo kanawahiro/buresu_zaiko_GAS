@@ -19,7 +19,19 @@ const COL_MAP = [
 
 function syncMasterToFacility() {
   // 大元シートをMapに変換
-  const masterSS = SpreadsheetApp.openById(MASTER_FILE_ID);
+  let masterSS;
+  try {
+    masterSS = SpreadsheetApp.openById(MASTER_FILE_ID);
+  } catch (e) {
+    SpreadsheetApp.getUi().alert(
+      '大元スプレッドシートを開けませんでした。\n\n' +
+      '確認事項:\n' +
+      '・大元シートへのアクセス権限があるか\n' +
+      '・ファイルIDが正しいか\n\n' +
+      '詳細: ' + e.message
+    );
+    return;
+  }
   const masterSheet = masterSS.getSheetByName(MASTER_SHEET_NAME);
   const masterData = masterSheet.getDataRange().getValues();
 

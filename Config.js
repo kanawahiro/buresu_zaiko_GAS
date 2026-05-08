@@ -35,13 +35,14 @@ const CONFIG = {
 
   // 指示ログ（ブレススプシに新規追加するシート）
   LOG_SHEET: '指示ログ',
-  LOG_HEADER: ['バスケットID', '作成日時', 'ステータス', '完了/キャンセル日時', 'items_json'],
+  LOG_HEADER: ['バスケットID', '作成日時', 'ステータス', '完了/キャンセル日時', 'items_json', '在庫変動'],
   LOG_COL: {
     ID: 1,
     CREATED_AT: 2,
     STATUS: 3,
     RESOLVED_AT: 4,
     ITEMS_JSON: 5,
+    STOCK_CHANGES: 6,  // 完了時のみ書き込み: [{msku, qty, aidu_before, aidu_after, buresu_before, buresu_after}, ...]
   },
 
   STATUS: {

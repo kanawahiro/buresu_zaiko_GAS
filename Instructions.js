@@ -35,12 +35,17 @@ function listInstructions_(payload) {
     try {
       items = JSON.parse(row[CONFIG.LOG_COL.ITEMS_JSON - 1] || '[]');
     } catch (_) { /* 破損行は items 空で返す */ }
+    let stockChanges = [];
+    try {
+      stockChanges = JSON.parse(row[CONFIG.LOG_COL.STOCK_CHANGES - 1] || '[]');
+    } catch (_) { /* 破損行は空で返す */ }
     result.push({
       id: id,
       created_at: toIsoString_(row[CONFIG.LOG_COL.CREATED_AT - 1]),
       status: status,
       resolved_at: toIsoString_(row[CONFIG.LOG_COL.RESOLVED_AT - 1]),
       items: items,
+      stock_changes: stockChanges,
     });
   }
   // 新しい順
@@ -149,18 +154,28 @@ function completeInstruction_(payload) {
 
     // 在庫更新（会津 -N、ブレス +N、両方の確認日付を当日に）
     const now = new Date();
+    const stockChanges = [];
     for (const p of plan) {
       buresu.getRange(p.bRow, CONFIG.BURESU_COL.STOCK).setValue(p.bStock + p.qty);
       buresu.getRange(p.bRow, CONFIG.BURESU_COL.CHECK_DATE).setValue(now);
       aidu.getRange(p.aRow, CONFIG.AIDU_COL.STOCK).setValue(p.aStock - p.qty);
       aidu.getRange(p.aRow, CONFIG.AIDU_COL.CHECK_DATE).setValue(now);
+      stockChanges.push({
+        msku: p.msku,
+        qty: p.qty,
+        aidu_before: p.aStock,
+        aidu_after: p.aStock - p.qty,
+        buresu_before: p.bStock,
+        buresu_after: p.bStock + p.qty,
+      });
     }
 
     // 指示ログ更新
     logSheet.getRange(rowIdx, CONFIG.LOG_COL.STATUS).setValue(CONFIG.STATUS.DONE);
     logSheet.getRange(rowIdx, CONFIG.LOG_COL.RESOLVED_AT).setValue(now);
+    logSheet.getRange(rowIdx, CONFIG.LOG_COL.STOCK_CHANGES).setValue(JSON.stringify(stockChanges));
 
-    return { success: true, id: id, resolved_at: now.toISOString() };
+    return { success: true, id: id, resolved_at: now.toISOString(), stock_changes: stockChanges };
   } finally {
     lock.releaseLock();
   }

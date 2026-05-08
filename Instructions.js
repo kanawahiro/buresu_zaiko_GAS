@@ -194,6 +194,43 @@ function cancelInstruction_(payload) {
   }
 }
 
+// ---------------- update (qty 編集) ----------------
+
+function updateInstruction_(payload) {
+  const id = payload && payload.id;
+  const items = payload && payload.items;
+  if (!id) return { success: false, error: 'id が必要です' };
+  if (!Array.isArray(items) || items.length === 0) {
+    return { success: false, error: 'items は 1件以上の配列で指定してください' };
+  }
+  for (const it of items) {
+    if (!it || !it.msku) return { success: false, error: 'item に msku がありません' };
+    const qty = Number(it.qty);
+    if (!Number.isFinite(qty) || qty <= 0 || !Number.isInteger(qty)) {
+      return { success: false, error: 'qty が不正: ' + it.msku + ' = ' + it.qty };
+    }
+  }
+
+  const lock = LockService.getDocumentLock();
+  if (!lock.tryLock(CONFIG.LOCK_TIMEOUT_MS)) {
+    return { success: false, error: 'lock 取得に失敗（しばらく待ってから再試行してください）' };
+  }
+  try {
+    const sheet = getOrCreateLogSheet_();
+    const rowIdx = findInstructionRow_(sheet, id);
+    if (rowIdx < 0) return { success: false, error: '指示が見つかりません: ' + id };
+
+    const status = sheet.getRange(rowIdx, CONFIG.LOG_COL.STATUS).getValue();
+    if (status !== CONFIG.STATUS.PENDING) {
+      return { success: false, error: 'すでに ' + status + ' の指示は編集できません' };
+    }
+    sheet.getRange(rowIdx, CONFIG.LOG_COL.ITEMS_JSON).setValue(JSON.stringify(items));
+    return { success: true, id: id, items: items };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 // ---------------- helpers ----------------
 
 /**

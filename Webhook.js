@@ -57,6 +57,9 @@ function doPost(e) {
       case 'cancel_instruction':
         result = cancelInstruction_(payload);
         break;
+      case 'update_instruction':
+        result = updateInstruction_(payload);
+        break;
       default:
         result = { success: false, error: 'unknown action: ' + action };
     }

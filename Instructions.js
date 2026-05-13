@@ -62,11 +62,34 @@ function createInstruction_(payload) {
   if (!Array.isArray(items) || items.length === 0) {
     return { success: false, error: 'items は 1件以上の配列で指定してください' };
   }
+  const okInt = function (n) { return Number.isFinite(n) && Number.isInteger(n); };
   for (const it of items) {
     if (!it || !it.msku) return { success: false, error: 'item に msku がありません' };
-    const qty = Number(it.qty);
-    if (!Number.isFinite(qty) || qty <= 0 || !Number.isInteger(qty)) {
-      return { success: false, error: 'qty が不正: ' + it.msku + ' = ' + it.qty };
+    // 新フォーマット: qty_min / qty_max を必須に
+    const hasRange = (it.qty_min !== undefined && it.qty_min !== null) ||
+                     (it.qty_max !== undefined && it.qty_max !== null);
+    if (hasRange) {
+      const min = Number(it.qty_min);
+      const max = Number(it.qty_max);
+      if (!okInt(min) || min < 1) {
+        return { success: false, error: 'qty_min が不正: ' + it.msku + ' = ' + it.qty_min };
+      }
+      if (!okInt(max) || max < min) {
+        return { success: false, error: 'qty_max が不正: ' + it.msku + ' = ' + it.qty_max + ' (qty_min=' + min + ')' };
+      }
+      // qty は未確定(0)でも OK。確定値が入っている場合のみ範囲チェック。
+      if (it.qty !== undefined && it.qty !== null && Number(it.qty) !== 0) {
+        const q = Number(it.qty);
+        if (!okInt(q) || q < min || q > max) {
+          return { success: false, error: 'qty が範囲外: ' + it.msku + ' (q=' + q + ' / ' + min + '〜' + max + ')' };
+        }
+      }
+    } else {
+      // 旧クライアント互換（qty のみ）
+      const qty = Number(it.qty);
+      if (!okInt(qty) || qty <= 0) {
+        return { success: false, error: 'qty が不正: ' + it.msku + ' = ' + it.qty };
+      }
     }
   }
 
@@ -122,6 +145,23 @@ function completeInstruction_(payload) {
       return { success: false, error: 'items_json のパースに失敗' };
     }
     if (!items.length) return { success: false, error: '指示の items が空です' };
+
+    // 防御的検証: 全 item の qty が確定済み（> 0、整数）かつ範囲内であること
+    const okInt = function (n) { return Number.isFinite(n) && Number.isInteger(n); };
+    for (const it of items) {
+      const q = Number(it.qty);
+      if (!okInt(q) || q <= 0) {
+        return { success: false, error: '確定数が未入力の品目があります: ' + (it && it.msku) };
+      }
+      if (it.qty_min !== undefined && it.qty_max !== undefined &&
+          it.qty_min !== null && it.qty_max !== null) {
+        const min = Number(it.qty_min);
+        const max = Number(it.qty_max);
+        if (okInt(min) && okInt(max) && (q < min || q > max)) {
+          return { success: false, error: '確定数が範囲外: ' + it.msku + ' (q=' + q + ' / ' + min + '〜' + max + ')' };
+        }
+      }
+    }
 
     const buresu = SpreadsheetApp.openById(CONFIG.BURESU_SS_ID).getSheetByName(CONFIG.BURESU_SHEET);
     const aidu = SpreadsheetApp.openById(CONFIG.AIDU_SS_ID).getSheetByName(CONFIG.AIDU_SHEET);
@@ -218,11 +258,27 @@ function updateInstruction_(payload) {
   if (!Array.isArray(items) || items.length === 0) {
     return { success: false, error: 'items は 1件以上の配列で指定してください' };
   }
+  const okInt = function (n) { return Number.isFinite(n) && Number.isInteger(n); };
   for (const it of items) {
     if (!it || !it.msku) return { success: false, error: 'item に msku がありません' };
-    const qty = Number(it.qty);
-    if (!Number.isFinite(qty) || qty <= 0 || !Number.isInteger(qty)) {
+    const q = Number(it.qty);
+    // 確定数は 0（未確定）でも保存OK。負数・小数・NaN は不可。
+    if (!okInt(q) || q < 0) {
       return { success: false, error: 'qty が不正: ' + it.msku + ' = ' + it.qty };
+    }
+    if (it.qty_min !== undefined && it.qty_max !== undefined &&
+        it.qty_min !== null && it.qty_max !== null) {
+      const min = Number(it.qty_min);
+      const max = Number(it.qty_max);
+      if (!okInt(min) || !okInt(max) || min < 1 || max < min) {
+        return { success: false, error: 'qty_min/qty_max が不正: ' + it.msku };
+      }
+      if (q > 0 && (q < min || q > max)) {
+        return { success: false, error: 'qty が範囲外: ' + it.msku + ' (q=' + q + ' / ' + min + '〜' + max + ')' };
+      }
+    } else if (q === 0) {
+      // 旧クライアント互換: qty_min/max 無しで qty=0 は無効
+      return { success: false, error: 'qty が不正: ' + it.msku + ' = 0' };
     }
   }
 

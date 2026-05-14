@@ -63,25 +63,44 @@ function createInstruction_(payload) {
     return { success: false, error: 'items は 1件以上の配列で指定してください' };
   }
   const okInt = function (n) { return Number.isFinite(n) && Number.isInteger(n); };
+  const hasField = function (it, k) { return (k in it) && it[k] !== null && it[k] !== undefined; };
   for (const it of items) {
     if (!it || !it.msku) return { success: false, error: 'item に msku がありません' };
-    // 新フォーマット: qty_min / qty_max を必須に
-    const hasRange = (it.qty_min !== undefined && it.qty_min !== null) ||
-                     (it.qty_max !== undefined && it.qty_max !== null);
-    if (hasRange) {
-      const min = Number(it.qty_min);
-      const max = Number(it.qty_max);
-      if (!okInt(min) || min < 1) {
-        return { success: false, error: 'qty_min が不正: ' + it.msku + ' = ' + it.qty_min };
+    const hasMin = hasField(it, 'qty_min');
+    const hasMax = hasField(it, 'qty_max');
+    const hasNewFields = ('qty_min' in it) || ('qty_max' in it);
+    if (hasNewFields) {
+      // 少なくとも片方は必要
+      if (!hasMin && !hasMax) {
+        return { success: false, error: 'qty_min/qty_max のどちらかは必要: ' + it.msku };
       }
-      if (!okInt(max) || max < min) {
-        return { success: false, error: 'qty_max が不正: ' + it.msku + ' = ' + it.qty_max + ' (qty_min=' + min + ')' };
+      let min = null, max = null;
+      if (hasMin) {
+        min = Number(it.qty_min);
+        if (!okInt(min) || min < 1) {
+          return { success: false, error: 'qty_min が不正: ' + it.msku + ' = ' + it.qty_min };
+        }
+      }
+      if (hasMax) {
+        max = Number(it.qty_max);
+        if (!okInt(max) || max < 1) {
+          return { success: false, error: 'qty_max が不正: ' + it.msku + ' = ' + it.qty_max };
+        }
+      }
+      if (hasMin && hasMax && max < min) {
+        return { success: false, error: 'qty_max < qty_min: ' + it.msku + ' (' + min + '〜' + max + ')' };
       }
       // qty は未確定(0)でも OK。確定値が入っている場合のみ範囲チェック。
       if (it.qty !== undefined && it.qty !== null && Number(it.qty) !== 0) {
         const q = Number(it.qty);
-        if (!okInt(q) || q < min || q > max) {
-          return { success: false, error: 'qty が範囲外: ' + it.msku + ' (q=' + q + ' / ' + min + '〜' + max + ')' };
+        if (!okInt(q) || q < 1) {
+          return { success: false, error: 'qty が不正: ' + it.msku + ' = ' + it.qty };
+        }
+        if (hasMin && q < min) {
+          return { success: false, error: 'qty が下限未満: ' + it.msku + ' (q=' + q + ' / min=' + min + ')' };
+        }
+        if (hasMax && q > max) {
+          return { success: false, error: 'qty が上限超過: ' + it.msku + ' (q=' + q + ' / max=' + max + ')' };
         }
       }
     } else {
@@ -148,17 +167,22 @@ function completeInstruction_(payload) {
 
     // 防御的検証: 全 item の qty が確定済み（> 0、整数）かつ範囲内であること
     const okInt = function (n) { return Number.isFinite(n) && Number.isInteger(n); };
+    const hasField = function (it, k) { return (k in it) && it[k] !== null && it[k] !== undefined; };
     for (const it of items) {
       const q = Number(it.qty);
       if (!okInt(q) || q <= 0) {
         return { success: false, error: '確定数が未入力の品目があります: ' + (it && it.msku) };
       }
-      if (it.qty_min !== undefined && it.qty_max !== undefined &&
-          it.qty_min !== null && it.qty_max !== null) {
+      if (hasField(it, 'qty_min')) {
         const min = Number(it.qty_min);
+        if (okInt(min) && q < min) {
+          return { success: false, error: '確定数が下限未満: ' + it.msku + ' (q=' + q + ' / min=' + min + ')' };
+        }
+      }
+      if (hasField(it, 'qty_max')) {
         const max = Number(it.qty_max);
-        if (okInt(min) && okInt(max) && (q < min || q > max)) {
-          return { success: false, error: '確定数が範囲外: ' + it.msku + ' (q=' + q + ' / ' + min + '〜' + max + ')' };
+        if (okInt(max) && q > max) {
+          return { success: false, error: '確定数が上限超過: ' + it.msku + ' (q=' + q + ' / max=' + max + ')' };
         }
       }
     }
@@ -259,6 +283,7 @@ function updateInstruction_(payload) {
     return { success: false, error: 'items は 1件以上の配列で指定してください' };
   }
   const okInt = function (n) { return Number.isFinite(n) && Number.isInteger(n); };
+  const hasField = function (it, k) { return (k in it) && it[k] !== null && it[k] !== undefined; };
   for (const it of items) {
     if (!it || !it.msku) return { success: false, error: 'item に msku がありません' };
     const q = Number(it.qty);
@@ -266,15 +291,33 @@ function updateInstruction_(payload) {
     if (!okInt(q) || q < 0) {
       return { success: false, error: 'qty が不正: ' + it.msku + ' = ' + it.qty };
     }
-    if (it.qty_min !== undefined && it.qty_max !== undefined &&
-        it.qty_min !== null && it.qty_max !== null) {
-      const min = Number(it.qty_min);
-      const max = Number(it.qty_max);
-      if (!okInt(min) || !okInt(max) || min < 1 || max < min) {
-        return { success: false, error: 'qty_min/qty_max が不正: ' + it.msku };
+    const hasMin = hasField(it, 'qty_min');
+    const hasMax = hasField(it, 'qty_max');
+    const hasNewFields = ('qty_min' in it) || ('qty_max' in it);
+    if (hasNewFields) {
+      let min = null, max = null;
+      if (hasMin) {
+        min = Number(it.qty_min);
+        if (!okInt(min) || min < 1) {
+          return { success: false, error: 'qty_min が不正: ' + it.msku };
+        }
       }
-      if (q > 0 && (q < min || q > max)) {
-        return { success: false, error: 'qty が範囲外: ' + it.msku + ' (q=' + q + ' / ' + min + '〜' + max + ')' };
+      if (hasMax) {
+        max = Number(it.qty_max);
+        if (!okInt(max) || max < 1) {
+          return { success: false, error: 'qty_max が不正: ' + it.msku };
+        }
+      }
+      if (hasMin && hasMax && max < min) {
+        return { success: false, error: 'qty_max < qty_min: ' + it.msku };
+      }
+      if (q > 0) {
+        if (hasMin && q < min) {
+          return { success: false, error: 'qty が下限未満: ' + it.msku + ' (q=' + q + ' / min=' + min + ')' };
+        }
+        if (hasMax && q > max) {
+          return { success: false, error: 'qty が上限超過: ' + it.msku + ' (q=' + q + ' / max=' + max + ')' };
+        }
       }
     } else if (q === 0) {
       // 旧クライアント互換: qty_min/max 無しで qty=0 は無効

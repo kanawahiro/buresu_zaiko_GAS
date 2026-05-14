@@ -39,6 +39,8 @@ function listInstructions_(payload) {
     try {
       stockChanges = JSON.parse(row[CONFIG.LOG_COL.STOCK_CHANGES - 1] || '[]');
     } catch (_) { /* 破損行は空で返す */ }
+    const rawBox = row[CONFIG.LOG_COL.BOX_COUNT - 1];
+    const boxCount = (rawBox === '' || rawBox === null || rawBox === undefined) ? 0 : Number(rawBox);
     result.push({
       id: id,
       created_at: toIsoString_(row[CONFIG.LOG_COL.CREATED_AT - 1]),
@@ -46,6 +48,7 @@ function listInstructions_(payload) {
       resolved_at: toIsoString_(row[CONFIG.LOG_COL.RESOLVED_AT - 1]),
       items: items,
       stock_changes: stockChanges,
+      box_count: Number.isFinite(boxCount) ? boxCount : 0,
     });
   }
   // 新しい順
@@ -120,7 +123,7 @@ function createInstruction_(payload) {
     const sheet = getOrCreateLogSheet_();
     const id = generateInstructionId_();
     const now = new Date();
-    sheet.appendRow([id, now, CONFIG.STATUS.PENDING, '', JSON.stringify(items)]);
+    sheet.appendRow([id, now, CONFIG.STATUS.PENDING, '', JSON.stringify(items), '', 0]);
     return {
       success: true,
       instruction: {
@@ -129,6 +132,7 @@ function createInstruction_(payload) {
         status: CONFIG.STATUS.PENDING,
         resolved_at: null,
         items: items,
+        box_count: 0,
       },
     };
   } finally {
@@ -273,6 +277,36 @@ function cancelInstruction_(payload) {
   }
 }
 
+// ---------------- set_box_count (想定箱数の更新) ----------------
+
+function setBoxCount_(payload) {
+  const id = payload && payload.id;
+  if (!id) return { success: false, error: 'id が必要です' };
+  const boxCount = Number(payload && payload.box_count);
+  if (!Number.isFinite(boxCount) || !Number.isInteger(boxCount) || boxCount < 0) {
+    return { success: false, error: 'box_count が不正: ' + (payload && payload.box_count) };
+  }
+
+  const lock = LockService.getDocumentLock();
+  if (!lock.tryLock(CONFIG.LOCK_TIMEOUT_MS)) {
+    return { success: false, error: 'lock 取得に失敗（しばらく待ってから再試行してください）' };
+  }
+  try {
+    const sheet = getOrCreateLogSheet_();
+    const rowIdx = findInstructionRow_(sheet, id);
+    if (rowIdx < 0) return { success: false, error: '指示が見つかりません: ' + id };
+
+    const status = sheet.getRange(rowIdx, CONFIG.LOG_COL.STATUS).getValue();
+    if (status !== CONFIG.STATUS.PENDING) {
+      return { success: false, error: 'すでに ' + status + ' の指示は編集できません' };
+    }
+    sheet.getRange(rowIdx, CONFIG.LOG_COL.BOX_COUNT).setValue(boxCount);
+    return { success: true, id: id, box_count: boxCount };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 // ---------------- update (qty 編集) ----------------
 
 function updateInstruction_(payload) {
@@ -349,7 +383,7 @@ function updateInstruction_(payload) {
 
 /**
  * ブレススプシに「指示ログ」シートが無ければ新規作成してヘッダーを書く。
- * 既存シートには一切手を加えない（ヘッダー上書きもしない）。
+ * 既存シートには基本手を加えないが、列が増えた場合のみヘッダーを末尾に追記する。
  */
 function getOrCreateLogSheet_() {
   const ss = SpreadsheetApp.openById(CONFIG.BURESU_SS_ID);
@@ -358,6 +392,14 @@ function getOrCreateLogSheet_() {
     sheet = ss.insertSheet(CONFIG.LOG_SHEET);
     sheet.getRange(1, 1, 1, CONFIG.LOG_HEADER.length).setValues([CONFIG.LOG_HEADER]);
     sheet.setFrozenRows(1);
+    return sheet;
+  }
+  // 既存シートに列が足りない場合のみヘッダー末尾を補充（既存ヘッダーは上書きしない）
+  const currentLastCol = sheet.getLastColumn();
+  if (currentLastCol < CONFIG.LOG_HEADER.length) {
+    const startCol = Math.max(currentLastCol + 1, 1);
+    const additional = CONFIG.LOG_HEADER.slice(startCol - 1);
+    sheet.getRange(1, startCol, 1, additional.length).setValues([additional]);
   }
   return sheet;
 }

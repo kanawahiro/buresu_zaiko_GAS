@@ -60,6 +60,9 @@ function doPost(e) {
       case 'update_instruction':
         result = updateInstruction_(payload);
         break;
+      case 'set_box_count':
+        result = setBoxCount_(payload);
+        break;
       default:
         result = { success: false, error: 'unknown action: ' + action };
     }

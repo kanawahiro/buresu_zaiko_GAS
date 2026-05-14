@@ -169,25 +169,13 @@ function completeInstruction_(payload) {
     }
     if (!items.length) return { success: false, error: '指示の items が空です' };
 
-    // 防御的検証: 全 item の qty が確定済み（> 0、整数）かつ範囲内であること
+    // 防御的検証: 全 item の qty が確定済み（> 0、整数）であること。
+    // qty_min/qty_max は指示時の希望範囲として保存されるが、範囲外でも確定OK。
     const okInt = function (n) { return Number.isFinite(n) && Number.isInteger(n); };
-    const hasField = function (it, k) { return (k in it) && it[k] !== null && it[k] !== undefined; };
     for (const it of items) {
       const q = Number(it.qty);
       if (!okInt(q) || q <= 0) {
         return { success: false, error: '確定数が未入力の品目があります: ' + (it && it.msku) };
-      }
-      if (hasField(it, 'qty_min')) {
-        const min = Number(it.qty_min);
-        if (okInt(min) && q < min) {
-          return { success: false, error: '確定数が下限未満: ' + it.msku + ' (q=' + q + ' / min=' + min + ')' };
-        }
-      }
-      if (hasField(it, 'qty_max')) {
-        const max = Number(it.qty_max);
-        if (okInt(max) && q > max) {
-          return { success: false, error: '確定数が上限超過: ' + it.msku + ' (q=' + q + ' / max=' + max + ')' };
-        }
       }
     }
 
@@ -345,14 +333,7 @@ function updateInstruction_(payload) {
       if (hasMin && hasMax && max < min) {
         return { success: false, error: 'qty_max < qty_min: ' + it.msku };
       }
-      if (q > 0) {
-        if (hasMin && q < min) {
-          return { success: false, error: 'qty が下限未満: ' + it.msku + ' (q=' + q + ' / min=' + min + ')' };
-        }
-        if (hasMax && q > max) {
-          return { success: false, error: 'qty が上限超過: ' + it.msku + ' (q=' + q + ' / max=' + max + ')' };
-        }
-      }
+      // qty_min/qty_max は指示時の希望範囲。確定数 q が範囲外でも保存OK（更新時の範囲チェックなし）
     } else if (q === 0) {
       // 旧クライアント互換: qty_min/max 無しで qty=0 は無効
       return { success: false, error: 'qty が不正: ' + it.msku + ' = 0' };

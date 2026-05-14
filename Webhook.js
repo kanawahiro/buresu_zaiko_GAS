@@ -57,6 +57,9 @@ function doPost(e) {
       case 'cancel_instruction':
         result = cancelInstruction_(payload);
         break;
+      case 'revert_instruction':
+        result = revertInstruction_(payload);
+        break;
       case 'update_instruction':
         result = updateInstruction_(payload);
         break;

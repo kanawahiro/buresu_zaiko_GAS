@@ -6,6 +6,7 @@
  * - createInstruction_    : 1指示バスケットを 1行として追加（在庫は触らない）
  * - completeInstruction_  : 在庫を 会津-N / ブレス+N、確認日付更新、ステータス完了
  * - cancelInstruction_    : ステータスのみキャンセル（在庫は触らない）
+ * - revertInstruction_    : 完了済を巻き戻し（会津+N / ブレス-N、ステータス取消）
  *
  * 共有スプシで触る列を厳格に限定:
  *   会津 R 列, S 列  /  ブレス H 列, I 列  /  ブレス「指示ログ」シート
@@ -186,6 +187,10 @@ function completeInstruction_(payload) {
     const buresuRowMap = buildMskuRowMap_(buresu, CONFIG.BURESU_COL.MSKU);
     const aiduRowMap = buildMskuRowMap_(aidu, CONFIG.AIDU_COL.MSKU);
 
+    // 在庫列を 1回ずつ一括で読む（getValue ループを廃して往復回数を削減）
+    const buresuStockCol = readColumn_(buresu, CONFIG.BURESU_COL.STOCK);
+    const aiduStockCol = readColumn_(aidu, CONFIG.AIDU_COL.STOCK);
+
     // 事前検証: 全 MSKU が両シートに存在し、会津在庫が足りるか
     const errors = [];
     const plan = []; // { msku, qty, bRow, aRow, bStock, aStock }
@@ -195,8 +200,8 @@ function completeInstruction_(payload) {
       const aRow = aiduRowMap[it.msku];
       if (!bRow) { errors.push(it.msku + ': ブレスシートに該当行なし'); continue; }
       if (!aRow) { errors.push(it.msku + ': 会津シートに該当行なし'); continue; }
-      const bStock = toNumberSafe_(buresu.getRange(bRow, CONFIG.BURESU_COL.STOCK).getValue());
-      const aStock = toNumberSafe_(aidu.getRange(aRow, CONFIG.AIDU_COL.STOCK).getValue());
+      const bStock = toNumberSafe_(buresuStockCol[bRow - CONFIG.DATA_START_ROW]);
+      const aStock = toNumberSafe_(aiduStockCol[aRow - CONFIG.DATA_START_ROW]);
       if (aStock < qty) {
         errors.push(it.msku + ': 会津在庫 ' + aStock + ' < 送る数 ' + qty);
         continue;
@@ -208,14 +213,13 @@ function completeInstruction_(payload) {
       return { success: false, error: '在庫不整合のため中止: ' + errors.join('; ') };
     }
 
-    // 在庫更新（会津 -N、ブレス +N、両方の確認日付を当日に）
+    // 在庫更新（会津 -N、ブレス +N、両方の確認日付を当日に）。
+    // STOCK と CHECK_DATE は隣接列のため、品目ごとに 1 setValues で 2セル同時更新（呼び出し回数を半減）。
     const now = new Date();
     const stockChanges = [];
     for (const p of plan) {
-      buresu.getRange(p.bRow, CONFIG.BURESU_COL.STOCK).setValue(p.bStock + p.qty);
-      buresu.getRange(p.bRow, CONFIG.BURESU_COL.CHECK_DATE).setValue(now);
-      aidu.getRange(p.aRow, CONFIG.AIDU_COL.STOCK).setValue(p.aStock - p.qty);
-      aidu.getRange(p.aRow, CONFIG.AIDU_COL.CHECK_DATE).setValue(now);
+      buresu.getRange(p.bRow, CONFIG.BURESU_COL.STOCK, 1, 2).setValues([[p.bStock + p.qty, now]]);
+      aidu.getRange(p.aRow, CONFIG.AIDU_COL.STOCK, 1, 2).setValues([[p.aStock - p.qty, now]]);
       stockChanges.push({
         msku: p.msku,
         qty: p.qty,
@@ -260,6 +264,91 @@ function cancelInstruction_(payload) {
     sheet.getRange(rowIdx, CONFIG.LOG_COL.STATUS).setValue(CONFIG.STATUS.CANCELLED);
     sheet.getRange(rowIdx, CONFIG.LOG_COL.RESOLVED_AT).setValue(now);
     return { success: true, id: id, resolved_at: now.toISOString() };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ---------------- revert (完了済み → 取消) ----------------
+//
+// 完了済み指示の在庫変動を巻き戻す。会津 += qty / ブレス -= qty。
+// STOCK_CHANGES 列は元の値を保持し、ステータスのみ '取消' に更新する。
+
+function revertInstruction_(payload) {
+  const id = payload && payload.id;
+  if (!id) return { success: false, error: 'id が必要です' };
+
+  const lock = LockService.getDocumentLock();
+  if (!lock.tryLock(CONFIG.LOCK_TIMEOUT_MS)) {
+    return { success: false, error: 'lock 取得に失敗（しばらく待ってから再試行してください）' };
+  }
+  try {
+    const logSheet = getOrCreateLogSheet_();
+    const rowIdx = findInstructionRow_(logSheet, id);
+    if (rowIdx < 0) return { success: false, error: '指示が見つかりません: ' + id };
+
+    const status = logSheet.getRange(rowIdx, CONFIG.LOG_COL.STATUS).getValue();
+    if (status !== CONFIG.STATUS.DONE) {
+      return { success: false, error: '完了済みの指示のみ取消できます（現状: ' + status + '）' };
+    }
+
+    const changesJson = logSheet.getRange(rowIdx, CONFIG.LOG_COL.STOCK_CHANGES).getValue();
+    let changes;
+    try {
+      changes = JSON.parse(changesJson || '[]');
+    } catch (_) {
+      return { success: false, error: 'stock_changes のパースに失敗' };
+    }
+    if (!Array.isArray(changes) || changes.length === 0) {
+      return { success: false, error: '在庫変動の記録がないため取消できません' };
+    }
+
+    const buresu = SpreadsheetApp.openById(CONFIG.BURESU_SS_ID).getSheetByName(CONFIG.BURESU_SHEET);
+    const aidu = SpreadsheetApp.openById(CONFIG.AIDU_SS_ID).getSheetByName(CONFIG.AIDU_SHEET);
+    if (!buresu || !aidu) return { success: false, error: '在庫シートが見つかりません' };
+
+    const buresuRowMap = buildMskuRowMap_(buresu, CONFIG.BURESU_COL.MSKU);
+    const aiduRowMap = buildMskuRowMap_(aidu, CONFIG.AIDU_COL.MSKU);
+    const buresuStockCol = readColumn_(buresu, CONFIG.BURESU_COL.STOCK);
+    const aiduStockCol = readColumn_(aidu, CONFIG.AIDU_COL.STOCK);
+
+    // 事前検証: 全 MSKU が両シートにあり、施設在庫が戻す量以上あること
+    const errors = [];
+    const plan = []; // { msku, qty, bRow, aRow, bStock, aStock }
+    for (const c of changes) {
+      const qty = Number(c.qty);
+      if (!Number.isFinite(qty) || qty <= 0) {
+        errors.push((c.msku || '?') + ': qty が不正');
+        continue;
+      }
+      const bRow = buresuRowMap[c.msku];
+      const aRow = aiduRowMap[c.msku];
+      if (!bRow) { errors.push(c.msku + ': ブレスシートに該当行なし'); continue; }
+      if (!aRow) { errors.push(c.msku + ': 会津シートに該当行なし'); continue; }
+      const bStock = toNumberSafe_(buresuStockCol[bRow - CONFIG.DATA_START_ROW]);
+      const aStock = toNumberSafe_(aiduStockCol[aRow - CONFIG.DATA_START_ROW]);
+      if (bStock < qty) {
+        errors.push(c.msku + ': 施設在庫 ' + bStock + ' < 戻す量 ' + qty);
+        continue;
+      }
+      plan.push({ msku: c.msku, qty: qty, bRow: bRow, aRow: aRow, bStock: bStock, aStock: aStock });
+    }
+    if (errors.length > 0) {
+      return { success: false, error: '取消不可: ' + errors.join('; ') };
+    }
+
+    // 逆適用: 会津 += qty / ブレス -= qty
+    const now = new Date();
+    for (const p of plan) {
+      buresu.getRange(p.bRow, CONFIG.BURESU_COL.STOCK, 1, 2).setValues([[p.bStock - p.qty, now]]);
+      aidu.getRange(p.aRow, CONFIG.AIDU_COL.STOCK, 1, 2).setValues([[p.aStock + p.qty, now]]);
+    }
+
+    // 指示ログ: ステータスを 取消 に、RESOLVED_AT を now に。STOCK_CHANGES 列は元の値を保持。
+    logSheet.getRange(rowIdx, CONFIG.LOG_COL.STATUS).setValue(CONFIG.STATUS.REVOKED);
+    logSheet.getRange(rowIdx, CONFIG.LOG_COL.RESOLVED_AT).setValue(now);
+
+    return { success: true, id: id, reverted_at: now.toISOString(), stock_changes: changes };
   } finally {
     lock.releaseLock();
   }
@@ -405,6 +494,16 @@ function buildMskuRowMap_(sheet, mskuCol) {
     if (m) map[m] = CONFIG.DATA_START_ROW + i;
   }
   return map;
+}
+
+// 指定列をデータ範囲全体まとめて読む。返値は配列（インデックス 0 = DATA_START_ROW）。
+function readColumn_(sheet, col) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < CONFIG.DATA_START_ROW) return [];
+  const values = sheet.getRange(CONFIG.DATA_START_ROW, col, lastRow - 1, 1).getValues();
+  const out = new Array(values.length);
+  for (let i = 0; i < values.length; i++) out[i] = values[i][0];
+  return out;
 }
 
 function generateInstructionId_() {

@@ -50,6 +50,7 @@ const CONFIG = {
     PENDING: '未発送',
     DONE: '完了',
     CANCELLED: 'キャンセル',
+    REVOKED: '取消',     // 完了済を在庫巻き戻ししたもの
   },
 
   // データ行は 2行目から（1行目はヘッダー）

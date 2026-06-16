@@ -45,6 +45,9 @@ function doPost(e) {
       case 'load_inventory':
         result = loadInventory_();
         break;
+      case 'load_sales_results':
+        result = loadSalesResults_();
+        break;
       case 'list_instructions':
         result = listInstructions_(payload);
         break;

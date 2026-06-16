@@ -33,6 +33,10 @@ const CONFIG = {
     CHECK_DATE: 19, // S列  確認日付
   },
 
+  // 販売実績シート（読み取り専用 — 在庫表に前回/前々回イベント販売数を表示するため）
+  SALES_SS_ID: '1zj6FEWTAXexP2V0_DFyolvWPyT8V2Vb1A2Ve2pXHmHM',
+  SALES_SHEET: '販売実績',
+
   // 指示ログ（ブレススプシに新規追加するシート）
   LOG_SHEET: '指示ログ',
   LOG_HEADER: ['バスケットID', '作成日時', 'ステータス', '完了/キャンセル日時', 'items_json', '在庫変動', '想定箱数'],

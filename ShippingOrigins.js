@@ -26,20 +26,23 @@ function loadShippingOrigins_() {
       warnings.push({ rule: index + 1, type: 'unsupported_rule', message: condition.message });
       return;
     }
-    const ruleMatches = candidates.filter(function(item) { return condition.matches(item.searchText); });
-    if (!ruleMatches.length) {
-      warnings.push({ rule: index + 1, type: 'unmatched_rule', message: 'MSKU対応を確認できません: ' + condition.label });
-      return;
-    }
-    // 商品管理番号・販売SKUの完全対応表をこのGASで参照できないため、会津マスターの
-    // 表記照合が一意に決まる場合だけ確定表示する。複数候補を同じ出荷元と推測しない。
-    if (ruleMatches.length !== 1) {
-      warnings.push({ rule: index + 1, type: 'ambiguous_mapping', message: 'MSKU対応が一意に決まりません: ' + condition.label + ' (' + ruleMatches.length + '件)' });
-      return;
-    }
-    const item = ruleMatches[0];
-    if (!matches[item.msku]) matches[item.msku] = [];
-    matches[item.msku].push({ origin: origin, condition: condition.label });
+    // ORは各原子条件を別々に一意対応させる。複数商品を列挙したORを1件扱いにしない。
+    condition.matchers.forEach(function(matcher) {
+      const ruleMatches = candidates.filter(function(item) { return matcher.matches(item.searchText); });
+      if (!ruleMatches.length) {
+        warnings.push({ rule: index + 1, type: 'unmatched_rule', message: 'MSKU対応を確認できません: ' + matcher.label });
+        return;
+      }
+      // 商品管理番号・販売SKUの完全対応表をこのGASで参照できないため、会津マスターの
+      // 表記照合が一意に決まる場合だけ確定表示する。複数候補を同じ出荷元と推測しない。
+      if (ruleMatches.length !== 1) {
+        warnings.push({ rule: index + 1, type: 'ambiguous_mapping', message: 'MSKU対応が一意に決まりません: ' + matcher.label + ' (' + ruleMatches.length + '件)' });
+        return;
+      }
+      const item = ruleMatches[0];
+      if (!matches[item.msku]) matches[item.msku] = [];
+      matches[item.msku].push({ origin: origin, condition: matcher.label });
+    });
   });
 
   const origins = Object.keys(matches).sort().map(function(msku) {
@@ -120,7 +123,7 @@ function shippingRuleCondition_(rule) {
   const type = String(condition.getCriteriaType());
   const values = condition.getCriteriaValues().map(function(value) { return String(value || ''); });
   if (type === 'TEXT_CONTAINS') return shippingContainsCondition_(values[0]);
-  if (type === 'CUSTOM_FORMULA') return shippingCustomFormulaCondition_(values[0]);
+  if (type === 'CUSTOM_FORMULA') return shippingCustomFormulaCondition_(values[0], rule);
   return { supported: false, message: '未対応の条件式: ' + type };
 }
 
@@ -129,42 +132,50 @@ function shippingContainsCondition_(term) {
   if (normalized.length < CONFIG.SHIPPING_ORIGIN_MIN_TERM_LENGTH) {
     return { supported: false, message: '照合語が短すぎます: ' + term };
   }
-  return {
+  const matcher = {
     supported: true,
     label: '品名に「' + term + '」を含む',
     matches: function(text) { return text.indexOf(normalized) !== -1; },
   };
+  matcher.matchers = [matcher];
+  return matcher;
 }
 
-function shippingCustomFormulaCondition_(formula) {
+function shippingCustomFormulaCondition_(formula, rule) {
   // Q列だけを参照する単一の SEARCH / REGEXMATCH、または SEARCH の OR 結合だけを許可する。
   // AND、他列参照、注文全体参照などは商品単位へ縮約せず、未対応として残す。
   const body = String(formula || '').trim().replace(/^=/, '').trim();
-  const ref = '\\$?Q\\$?\\d+';
+  const ref = '(\\$?)([A-Z]+)(\\$?)(\\d+)';
   const quoted = '"((?:[^"\\\\]|\\\\.|"")*)"';
   const searchAtom = '(?:ISNUMBER\\s*\\(\\s*)?SEARCH\\(\\s*' + quoted + '\\s*,\\s*' + ref + '\\s*\\)\\s*\\)?';
   const directSearch = new RegExp('^' + searchAtom + '$', 'i');
   const directMatch = directSearch.exec(body);
-  if (directMatch) return shippingSearchTermsCondition_([directMatch[1].replace(/""/g, '"')]);
+  if (directMatch && shippingReferenceResolvesToQ_(directMatch.slice(2, 6), rule)) return shippingSearchTermsCondition_([directMatch[1].replace(/""/g, '"')]);
 
   const orMatch = /^OR\((.*)\)$/i.exec(body);
   if (orMatch) {
     const atom = new RegExp(searchAtom, 'gi');
     const terms = [];
     let found;
-    while ((found = atom.exec(orMatch[1]))) terms.push(found[1].replace(/""/g, '"'));
+    while ((found = atom.exec(orMatch[1]))) {
+      if (!shippingReferenceResolvesToQ_(found.slice(2, 6), rule)) return { supported: false, message: 'Q列へ解決しない相対参照: ' + formula };
+      terms.push(found[1].replace(/""/g, '"'));
+    }
     // 原子式を除いた残りが区切りのカンマと空白だけなら、他の条件を含まない安全な OR。
     const remainder = orMatch[1].replace(new RegExp(searchAtom, 'gi'), '').replace(/[\s,]/g, '');
     if (terms.length && !remainder) return shippingSearchTermsCondition_(terms);
   }
 
   const regex = new RegExp('^REGEXMATCH\\(\\s*' + ref + '\\s*,\\s*' + quoted + '\\s*\\)$', 'i').exec(body);
-  if (regex) {
+  if (regex && shippingReferenceResolvesToQ_(regex.slice(1, 5), rule)) {
     try {
-      const expression = new RegExp(regex[1].replace(/""/g, '"'), 'i');
-      return { supported: true, label: '品名の正規表現: ' + regex[1], matches: function(text) { return expression.test(text); } };
+      const pattern = regex[5].replace(/""/g, '"');
+      const expression = new RegExp(pattern, 'i');
+      const matcher = { supported: true, label: '品名の正規表現: ' + pattern, matches: function(text) { return expression.test(text); } };
+      matcher.matchers = [matcher];
+      return matcher;
     } catch (err) {
-      return { supported: false, message: '無効な正規表現: ' + regex[1] };
+      return { supported: false, message: '無効な正規表現: ' + regex[5] };
     }
   }
   return { supported: false, message: '商品単位へ安全に解釈できないカスタム数式: ' + formula };
@@ -174,11 +185,28 @@ function shippingSearchTermsCondition_(terms) {
   const conditions = terms.map(shippingContainsCondition_);
   const unsupported = conditions.find(function(item) { return !item.supported; });
   if (unsupported) return unsupported;
+  conditions.forEach(function(condition) { condition.matchers = [condition]; });
   return {
     supported: true,
     label: conditions.map(function(item) { return item.label; }).join(' / '),
     matches: function(text) { return conditions.some(function(item) { return item.matches(text); }); },
+    matchers: conditions,
   };
+}
+
+function shippingReferenceResolvesToQ_(parts, rule) {
+  const absoluteColumn = parts[0] === '$';
+  const baseColumn = shippingColumnNumber_(parts[1]);
+  return rule.getRanges().filter(function(range) {
+    return range.getColumn() <= CONFIG.ORDER_PRODUCT_COLUMN && range.getLastColumn() >= CONFIG.ORDER_PRODUCT_COLUMN;
+  }).every(function(range) {
+    const effectiveColumn = absoluteColumn ? baseColumn : baseColumn + CONFIG.ORDER_PRODUCT_COLUMN - range.getColumn();
+    return effectiveColumn === CONFIG.ORDER_PRODUCT_COLUMN;
+  });
+}
+
+function shippingColumnNumber_(letters) {
+  return String(letters).toUpperCase().split('').reduce(function(value, letter) { return value * 26 + letter.charCodeAt(0) - 64; }, 0);
 }
 
 function shippingNormalize_(value) {

@@ -28,6 +28,17 @@ function loadShippingOrigins_() {
     }
     // ORは各原子条件を別々に一意対応させる。複数商品を列挙したORを1件扱いにしない。
     condition.matchers.forEach(function(matcher) {
+      const manuallyMappedMsku = CONFIG.SHIPPING_ORIGIN_MANUAL_MSKU_MAP[matcher.mappingKey];
+      if (manuallyMappedMsku) {
+        const item = candidates.find(function(candidate) { return candidate.msku === manuallyMappedMsku; });
+        if (!item) {
+          warnings.push({ rule: index + 1, type: 'invalid_manual_mapping', message: '対応先MSKUが会津マスターにありません: ' + manuallyMappedMsku });
+          return;
+        }
+        if (!matches[item.msku]) matches[item.msku] = [];
+        matches[item.msku].push({ origin: origin, condition: matcher.label });
+        return;
+      }
       const ruleMatches = candidates.filter(function(item) { return matcher.matches(item.searchText); });
       if (!ruleMatches.length) {
         warnings.push({ rule: index + 1, type: 'unmatched_rule', message: 'MSKU対応を確認できません: ' + matcher.label });
@@ -136,6 +147,7 @@ function shippingContainsCondition_(term) {
     supported: true,
     label: '品名に「' + term + '」を含む',
     matches: function(text) { return text.indexOf(normalized) !== -1; },
+    mappingKey: shippingManualMappingKey_(term),
   };
   matcher.matchers = [matcher];
   return matcher;
@@ -171,7 +183,7 @@ function shippingCustomFormulaCondition_(formula, rule) {
     try {
       const pattern = regex[5].replace(/""/g, '"');
       const expression = new RegExp(pattern, 'i');
-      const matcher = { supported: true, label: '品名の正規表現: ' + pattern, matches: function(text) { return expression.test(text); } };
+      const matcher = { supported: true, label: '品名の正規表現: ' + pattern, matches: function(text) { return expression.test(text); }, mappingKey: '' };
       matcher.matchers = [matcher];
       return matcher;
     } catch (err) {
@@ -211,4 +223,11 @@ function shippingColumnNumber_(letters) {
 
 function shippingNormalize_(value) {
   return String(value || '').normalize('NFKC').toLowerCase().replace(/[\s\-‐‑‒–—―_・\/／]/g, '');
+}
+
+function shippingManualMappingKey_(term) {
+  // 受注側だけに付く「お試し」とセット数を取り除く。色・サイズは残すのでMSKUは一意のまま。
+  return shippingNormalize_(term)
+    .replace(/お試し/g, '')
+    .replace(/×\d+(?:枚)?\(?$/, '');
 }

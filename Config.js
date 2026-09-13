@@ -47,6 +47,24 @@ const CONFIG = {
     '#fff2cc': '施設出荷',
   },
   SHIPPING_ORIGIN_MIN_TERM_LENGTH: 3,
+  // 受注の品名表記と会津マスターの表記が異なるものだけを、確認済みMSKUへ明示対応する。
+  // キーは ShippingOrigins.js の shippingManualMappingKey_() で正規化する。
+  SHIPPING_ORIGIN_MANUAL_MSKU_MAP: {
+    'pシート骨柄ホワイトs': 'MSKU0035',
+    'pシート骨柄ホワイトm': 'MSKU0036',
+    'pシート骨柄ホワイトl': 'MSKU0037',
+    'pシートホワイトs': 'MSKU0042',
+    'pシートホワイトm': 'MSKU0043',
+    'pシートホワイトl': 'MSKU0044',
+    'pシートシルバーs': 'MSKU0021',
+    'pシートシルバーm': 'MSKU0022',
+    'pシートシルバーl': 'MSKU0023',
+    'カラスネット1.2m×1.2m': 'MSKU0162',
+    'カラスネット1.5m×1.5m': 'MSKU0163',
+    '洗車タオル中': 'MSKU0178',
+    '洗車タオル大': 'MSKU0179',
+    '洗車タオル特大': 'MSKU0180',
+  },
 
   // 指示ログ（ブレススプシに新規追加するシート）
   LOG_SHEET: '指示ログ',

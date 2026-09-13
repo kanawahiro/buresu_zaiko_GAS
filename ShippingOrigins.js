@@ -23,6 +23,17 @@ function loadShippingOrigins_() {
 
     const condition = shippingRuleCondition_(rule);
     if (!condition.supported) {
+      const manualFormulaMapping = shippingManualFormulaMapping_(rule);
+      if (manualFormulaMapping) {
+        const item = candidates.find(function(candidate) { return candidate.msku === manualFormulaMapping.msku; });
+        if (item) {
+          if (!matches[item.msku]) matches[item.msku] = [];
+          matches[item.msku].push({ origin: origin, condition: manualFormulaMapping.label });
+          return;
+        }
+        warnings.push({ rule: index + 1, type: 'invalid_manual_mapping', message: '対応先MSKUが会津マスターにありません: ' + manualFormulaMapping.msku });
+        return;
+      }
       warnings.push({ rule: index + 1, type: 'unsupported_rule', message: condition.message });
       return;
     }
@@ -76,6 +87,20 @@ function loadShippingOrigins_() {
     unmatched_count: warnings.length,
     warnings: warnings,
   };
+}
+
+function shippingManualFormulaMapping_(rule) {
+  const condition = rule.getBooleanCondition();
+  if (!condition) return null;
+  const formula = String((condition.getCriteriaValues() || [])[0] || '').replace(/\s/g, '').replace(/^=/, '');
+  return (CONFIG.SHIPPING_ORIGIN_MANUAL_FORMULA_MAPPINGS || []).find(function(mapping) {
+    // 現在確認済みの「2つのSEARCHだけから成るOR式」と完全一致する場合だけ許可する。
+    // AND/NOT/別商品などが追加されたら一致しなくなり、未対応警告へ戻る。
+    const atoms = mapping.requiredTexts.map(function(text) {
+      return 'ISNUMBER(SEARCH("' + text + '",P1))';
+    });
+    return formula === 'OR(' + atoms[0] + ',' + atoms[1] + ')' || formula === 'OR(' + atoms[1] + ',' + atoms[0] + ')';
+  }) || null;
 }
 
 function shippingOriginCandidates_(sheet) {

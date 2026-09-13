@@ -71,6 +71,14 @@ const CONFIG = {
     '洗車タオル大': 'MSKU0179',
     '洗車タオル特大': 'MSKU0180',
   },
+  // P列を参照する既存条件式のうち、ユーザー確認済みのものだけを明示対応する。
+  SHIPPING_ORIGIN_MANUAL_FORMULA_MAPPINGS: [
+    {
+      requiredTexts: ['Pシート骨柄ホワイトL×２枚', 'Pシート骨柄ホワイトL×１枚'],
+      msku: 'MSKU0037',
+      label: 'ペットシーツ（骨柄ホワイト L）',
+    },
+  ],
 
   // 指示ログ（ブレススプシに新規追加するシート）
   LOG_SHEET: '指示ログ',

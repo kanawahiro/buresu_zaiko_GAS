@@ -50,6 +50,12 @@ const CONFIG = {
   // 受注の品名表記と会津マスターの表記が異なるものだけを、確認済みMSKUへ明示対応する。
   // キーは ShippingOrigins.js の shippingManualMappingKey_() で正規化する。
   SHIPPING_ORIGIN_MANUAL_MSKU_MAP: {
+    // 受注側の「フリル通常品」は、在庫マスターのエリザベスカラー通常品と同一扱い。
+    'フリル通常品ブルー': 'MSKU0001',
+    'フリル通常品グリーン': 'MSKU0002',
+    'フリル通常品ピンク': 'MSKU0003',
+    'フリル通常品イエロー': 'MSKU0004',
+    'フリル通常品グレー': 'MSKU0005',
     'pシート骨柄ホワイトs': 'MSKU0035',
     'pシート骨柄ホワイトm': 'MSKU0036',
     'pシート骨柄ホワイトl': 'MSKU0037',

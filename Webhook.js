@@ -48,6 +48,9 @@ function doPost(e) {
       case 'load_sales_results':
         result = loadSalesResults_();
         break;
+      case 'load_shipping_origins':
+        result = loadShippingOrigins_();
+        break;
       case 'list_instructions':
         result = listInstructions_(payload);
         break;

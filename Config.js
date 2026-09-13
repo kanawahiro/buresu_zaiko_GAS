@@ -37,6 +37,17 @@ const CONFIG = {
   SALES_SS_ID: '1zj6FEWTAXexP2V0_DFyolvWPyT8V2Vb1A2Ve2pXHmHM',
   SALES_SHEET: '販売実績',
 
+  // 受注シートの条件付き書式（Q列）から読み取る出荷元表示。読み取り専用。
+  ORDER_SS_ID: '1-e2UQanmr2nY6fkkDQzG507vh0fvPJmC-K0zQ0H-VtU',
+  ORDER_SHEET: '送付先単位',
+  ORDER_PRODUCT_COLUMN: 17, // Q列「備考 品名」
+  SHIPPING_ORIGIN_COLORS: {
+    '#ffffff': '会津出荷',
+    '#d9ead3': '施設出荷',
+    '#fff2cc': '施設出荷',
+  },
+  SHIPPING_ORIGIN_MIN_TERM_LENGTH: 3,
+
   // 指示ログ（ブレススプシに新規追加するシート）
   LOG_SHEET: '指示ログ',
   LOG_HEADER: ['バスケットID', '作成日時', 'ステータス', '完了/キャンセル日時', 'items_json', '在庫変動', '想定箱数'],

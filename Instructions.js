@@ -229,6 +229,7 @@ function completeInstruction_(payload) {
         buresu_after: p.bStock + p.qty,
       });
     }
+    SpreadsheetApp.flush();
 
     // 指示ログ更新
     logSheet.getRange(rowIdx, CONFIG.LOG_COL.STATUS).setValue(CONFIG.STATUS.DONE);
@@ -343,6 +344,7 @@ function revertInstruction_(payload) {
       buresu.getRange(p.bRow, CONFIG.BURESU_COL.STOCK, 1, 2).setValues([[p.bStock - p.qty, now]]);
       aidu.getRange(p.aRow, CONFIG.AIDU_COL.STOCK, 1, 2).setValues([[p.aStock + p.qty, now]]);
     }
+    SpreadsheetApp.flush();
 
     // 指示ログ: ステータスを 取消 に、RESOLVED_AT を now に。STOCK_CHANGES 列は元の値を保持。
     logSheet.getRange(rowIdx, CONFIG.LOG_COL.STATUS).setValue(CONFIG.STATUS.REVOKED);

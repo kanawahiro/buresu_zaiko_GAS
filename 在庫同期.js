@@ -91,5 +91,6 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('在庫同期')
     .addItem('商品情報を同期（大元→施設）', 'syncMasterToFacility')
+    .addItem('会津在庫の参照式を復旧', 'repairAizuBlessStockFormulas')
     .addToUi();
 }
